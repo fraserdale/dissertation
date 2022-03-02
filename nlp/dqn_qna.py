@@ -73,7 +73,7 @@ check_env(env, warn=True)
 # train a MLP Policy
 model = DQN(env=env, policy=DQNPolicy, gamma=0.99, batch_size=64, learning_rate=1e-3,
             double_q=False, exploration_fraction=0.1,
-            prioritized_replay=True, policy_kwargs={"layers": [64,64]},
+            prioritized_replay=False, policy_kwargs={"layers": [64,64]},
             verbose=1)
 for i in range(int(50)):
     model.learn(total_timesteps=int(1e+3), reset_num_timesteps=False)

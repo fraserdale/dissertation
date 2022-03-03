@@ -7,6 +7,34 @@ import tensorflow as tf
 from policies import * 
 
 tf.get_logger().setLevel('ERROR')
+tf.enable_eager_execution()
+
+
+def eval_model(env, model, pool):
+    print("=======================")
+    correctly_answered = 0.0
+    print(model)
+    for sample, index in tqdm.tqdm(pool, desc="Evaluating"):
+        obs = env.reset(sample)
+        state = None
+        done = False
+        sequence = []
+        
+        while not done:
+            action = model.get_action(obs)
+            sequence.append(action)
+            obs, _, done, info = env.step(action)
+
+        if info["selected_choice"] == sample.answer:
+            correctly_answered += 1
+            
+        print(sequence,info["selected_choice"] == sample.answer )
+            
+    rewards.append(correctly_answered/len(pool))
+
+    print("Correct: ", correctly_answered)
+    print("Out of: ", len(pool))
+    return correctly_answered/len(pool)
 
 class REINFORCE(object):
     def __init__(self, a_space, o_space):
@@ -16,7 +44,7 @@ class REINFORCE(object):
         self.states, self.actions, self.rewards = [], [], []
         self.policy = ReUpPolicy(self.state_space, 5, self.action_space)
         #self.policy = NoReUpPolicy(self.state_space, 5, self.action_space)
-        self.opt = tf.keras.optimizers.Adam(lr=0.06)
+        self.opt = tf.keras.optimizers.Adam(lr=0.01)
 
     def remember(self, s, a, r):
         self.states.append(s)
@@ -57,9 +85,64 @@ class REINFORCE(object):
         self.rewards.clear()
 
 
+from nlp_gym.data_pools.custom_question_answering_pools import QASC
+from nlp_gym.envs.question_answering.env import QAEnv
+from nlp_gym.envs.question_answering.featurizer import InformedFeaturizer, SimpleFeaturizer
+
+import tqdm
+# data pool
+data_pool = QASC.prepare(split="train")
+val_pool = QASC.prepare(split="val")
+
+# featurizer
+featurizer = InformedFeaturizer()
+
+
+from nlp_gym.envs.common.observation import BaseObservation
+from nlp_gym.envs.common.reward import RewardFunction
+class MyRewardFunction(RewardFunction):
+    def __call__(self, observation: BaseObservation, action: str, target: str) -> float:
+
+        current_time_step = observation.get_current_time_step()
+        total_time_steps = observation.get_total_steps()
+        selected_choice = observation.get_last_choice()        
+        # 1 * (2 ^ index)
+        #print("timestep: ",current_time_step)
+        if selected_choice == target:
+            max_reward =  (2.0 * (2 ^ current_time_step))
+            #print("c1 ",max_reward)
+        else: 
+            max_reward = (1.0 * (2 ^ current_time_step))
+            #print("c2 ",max_reward)
+
+        #print("max out",max_reward) 
+        
+        correct = 0
+        # if current action is ANSWER or ran out of input, then check the current choice and produce terminal reward
+        if action == "ANSWER" or current_time_step == total_time_steps - 1:
+            reward = (2.0 * (2 ^ current_time_step)) if selected_choice == target else 0.0
+            if selected_choice == target:
+              correct = 1 
+        elif action == "CONTINUE" and selected_choice != target:
+            reward = (1.0 * (2 ^ current_time_step)) if selected_choice != target else 0.0
+        else:
+            reward = 0.0
+       
+        if reward != 0 and max_reward == 0:
+            print("reward/max",reward,max_reward)
+        if reward > 0:
+            return reward/max_reward
+        else:            
+            return 0
+
+# seq tag env
+env = QAEnv(observation_featurizer=featurizer)
+for sample, weight in data_pool:
+    env.add_sample(sample, weight) 
+
 if __name__ == "__main__":
-    iterations = 300
-    rolling_avg = 20
+    iterations = 10000
+    rolling_avg = 200
 
     env = gym.make("CartPole-v1")
     agent = REINFORCE(env.action_space.n, env.observation_space.shape[0])
@@ -67,16 +150,24 @@ if __name__ == "__main__":
     avg_reward = deque(maxlen=iterations)
     best_avg_reward = avg = -math.inf
     rs = deque(maxlen=rolling_avg)
+    
+    
     for i in range(iterations):
         s1 = env.reset()
         total_reward = 0
         done = False
+        
+        actions = []
+        steps = 0
+        
         while not done:
             action = agent.get_action(s1)
+            actions.append(action)
             s2, reward, done, _ = env.step(action)
             total_reward += reward
             agent.remember(s1, action, reward)
             s1 = s2
+            steps +=1 
         agent.update()
         rewards.append(total_reward)
         rs.append(total_reward)
@@ -84,7 +175,7 @@ if __name__ == "__main__":
         avg_reward.append(avg)
         if avg > best_avg_reward:
             best_avg_reward = avg
-        print("\rEpisode {}/{} || Best average reward {}, Current Avg {}, Current Iteration Reward {}".format(i, iterations, best_avg_reward, avg, total_reward))
+        print("\rEpisode {}/{} || Best average reward {}, Current Avg {}, Current Iteration Reward {}".format(i, iterations, best_avg_reward, avg, total_reward), flush=True)
 
     plt.plot(rewards, color='blue', alpha=0.2, label='Reward')
     plt.plot(avg_reward, color='red', label='Average')
@@ -93,3 +184,4 @@ if __name__ == "__main__":
     plt.xlabel('Iteration')
     plt.show()
     plt.savefig("reinforce")
+    print(eval_model(env,agent,val_pool))

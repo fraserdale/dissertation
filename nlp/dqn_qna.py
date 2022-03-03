@@ -75,7 +75,7 @@ model = DQN(env=env, policy=DQNPolicy, gamma=0.99, batch_size=64, learning_rate=
             double_q=False, exploration_fraction=0.1,
             prioritized_replay=False, policy_kwargs={"layers": [64,64]},
             verbose=1)
-for i in range(int(50)):
+for i in range(int(5)):
     model.learn(total_timesteps=int(1e+3), reset_num_timesteps=False)
     print(eval_model(env, model, val_pool))
     

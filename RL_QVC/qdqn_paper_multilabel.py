@@ -1,3 +1,4 @@
+from msilib import sequence
 import gym
 import numpy as np
 import random
@@ -207,7 +208,7 @@ for i in range(iterations):
     avg_reward.append(avg)
     if avg > best_avg_reward:
         best_avg_reward = avg
-    print("\rEpisode {}/{} || Best average reward {}, Current Avg {}, Current Iteration Reward {}, eps {}".format(i, iterations, best_avg_reward, avg, total_reward, agent.epsilon), end='', flush=True)
+    print("\rEpisode {}/{} || Best average reward {}, Current Avg {}, Current Iteration Reward {}, eps {},sequence {}".format(i, iterations, best_avg_reward, avg, total_reward, agent.epsilon, sequence), end='', flush=True)
     
 
 import pickle

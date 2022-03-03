@@ -15,7 +15,7 @@ class ReUpPolicy(tf.keras.layers.Layer):
         self.total_params = self.num_params * 2
         self.params = sympy.symbols("params0:%d"%self.total_params)
         self.readout_ops = [cirq.Z(i) for i in self.qubits]
-        self.model = tfq.layers.ControlledPQC(self.make_circuit(lays, self.params), self.readout_ops, differentiator=tfq.differentiators.Adjoint())
+        self.model = tfq.layers.ControlledPQC(self.make_circuit(lays, self.params), self.readout_ops, differentiator=tfq.differentiators.ParameterShift())
         self.in_circuit = tfq.convert_to_tensor([cirq.Circuit()])
         self.beta = 1
         # [phis, lambs]
@@ -69,7 +69,7 @@ class ReUpPolicy(tf.keras.layers.Layer):
         # (1, 1) -> (batch, 1)
         input_circuits = tf.repeat(self.in_circuit, repeats=num_batch)
         # (batch, in_size) -> (batch, num_params)
-        inputs = tf.tile(inputs, [1, int(self.num_params/inputs.shape[1])])
+        inputs = tf.tile(inputs, [1, int(self.num_params//inputs.shape[1])])
         # (1, num_param) * (batch, num_params) -> (batch, num_params)
         lambs = tf.math.multiply(self.lamb, inputs)
         # (1, num_param) -> (batch, num_params)
@@ -95,7 +95,7 @@ class NoReUpPolicy(tf.keras.layers.Layer):
         self.total_params = self.num_params + 2 * len(self.qubits)
         self.params = sympy.symbols("params0:%d"%self.total_params)
         self.readout_ops = [cirq.Z(i) for i in self.qubits]
-        self.model = tfq.layers.ControlledPQC(self.make_circuit(lays, self.params), self.readout_ops, differentiator=tfq.differentiators.Adjoint())
+        self.model = tfq.layers.ControlledPQC(self.make_circuit(lays, self.params), self.readout_ops, differentiator=tfq.differentiators.ParameterShift())
         self.in_circuit = tfq.convert_to_tensor([cirq.Circuit()])
         self.beta = 1
 
@@ -140,7 +140,7 @@ class NoReUpPolicy(tf.keras.layers.Layer):
         # (1, 1) -> (batch, 1)
         input_circuits = tf.repeat(self.in_circuit, repeats=num_batch)
         # (batch, in_size) -> (batch, 2 * num_qubits)
-        inputs = tf.tile(inputs, [1, int((2 * len(self.qubits))/inputs.shape[1])])
+        inputs = tf.tile(inputs, [1, int((2 * len(self.qubits))//inputs.shape[1])])
         # (1, 2 * num_qubits) * (batch, 2 * num_qubits) -> (batch, 2 * num_qubits)
         lambs = tf.math.multiply(self.lamb, inputs)
         # (1, num_param) -> (batch, num_params)

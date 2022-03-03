@@ -28,23 +28,21 @@ def eval_model(env, model, pool):
         state = None
         done = False
         sequence = []
-        if correctly_answered < 5:
-            print("---------------")
         
         while not done:
             action = model.predict(obs)
             sequence.append(action)
-            obs, reward, done, info = env.step(action)
+            obs, _, done, info = env.step(action)
 
         if info["selected_choice"] == sample.answer:
             correctly_answered += 1
             
-        if index >= 100:
-            break
         print(sequence,info["selected_choice"] == sample.answer )
             
     rewards.append(correctly_answered/len(pool))
 
+    print("Correct: ", correctly_answered)
+    print("Out of: ", len(pool))
     return correctly_answered/len(pool)
 
 
@@ -56,7 +54,7 @@ class QDQN(object):
         self.state_space = state_space
         self.qubits = [cirq.GridQubit(0, i) for i in range(2)]
         self.q_network = self.make_func_approx()
-        self.learning_rate = 0.1
+        self.learning_rate = 0.001
         self.opt = tf.keras.optimizers.Adam(lr=self.learning_rate)
         self.buff = 1000
         self.batch = 32
@@ -68,8 +66,8 @@ class QDQN(object):
         # Q Learning
         self.gamma = 0.99 
         self.epsilon = 1.0
-        self.epsilon_decay = 0.99 #need to change
-        self.epsilon_min = 0.1
+        self.epsilon_decay = 0.999 #need to change
+        self.epsilon_min = 0.01
         self.counter = 0
 
     def make_func_approx(self):
@@ -85,9 +83,10 @@ class QDQN(object):
         return model
 
     def convert_data(self, classical_data, flag=True):
+        #print(classical_data)
         ops = cirq.Circuit()
         for i, ang in enumerate(classical_data):
-            ang = 0 if ang < 0.5 else 1
+            #ang = 0 if ang < 0.5 else 1
             ops.append(cirq.rx(np.pi * ang).on(self.qubits[i]))
             ops.append(cirq.rz(np.pi * ang).on(self.qubits[i]))
         if flag:
@@ -158,8 +157,10 @@ class QDQN(object):
 
     def get_action(self, obs):
         if random.random() < self.epsilon: 
+            print("rand")
             return np.random.choice(self.action_space)
         else:
+            print(np.argmax(self.q_network.predict(self.convert_data(obs), steps=1)[0][0]))
             return 1 if self.q_network.predict(self.convert_data(obs), steps=1)[0][0] > 0 else 0
         
     def predict(self,obs):
@@ -192,9 +193,9 @@ class QDQN(object):
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-iterations = 5
-rolling_avg = 50
-learn_delay = 200
+iterations = 10000
+rolling_avg = 200
+learn_delay = 500
 
 # data pool
 data_pool = QASC.prepare(split="train")
@@ -217,15 +218,17 @@ class MyRewardFunction(RewardFunction):
         selected_choice = observation.get_last_choice()        
         # 1 * (2 ^ index)
         
-        
+        correct = 0
         # if current action is ANSWER or ran out of input, then check the current choice and produce terminal reward
         if action == "ANSWER" or current_time_step == total_time_steps - 1:
-            reward = 2.0 * (2 ^ current_time_step) if selected_choice == target else 0.0
+            reward = (2.0 * (2 ^ current_time_step)) if selected_choice == target else 0.0
+            if selected_choice == target:
+              correct = 1 
         elif action == "CONTINUE" and selected_choice != target:
-            reward = 1.0* (2 ^ current_time_step) 
+            reward = (1.0 * (2 ^ current_time_step)) if selected_choice != target else 0.0
         else:
             reward = 0.0
-        return reward
+        return [reward,correct]
 
 # [1,1,0] 
 #rewards 
@@ -234,7 +237,7 @@ class MyRewardFunction(RewardFunction):
 
 
 # seq tag env
-env = QAEnv(observation_featurizer=featurizer, reward_function=MyRewardFunction())
+env = QAEnv(observation_featurizer=featurizer)
 for sample, weight in data_pool:
     env.add_sample(sample, weight)
 
@@ -254,17 +257,19 @@ for i in range(iterations):
     done = False
     steps = 0
     sequence = []
+    r2 = 0
+    rewardsequence= []
     
     while not done:
         #im = Image.fromarray(env.render(mode='rgb_array'))
         #frames.append(im)
         action = agent.get_action(s1)
         steps += 1
-        s2, reward, done, info = env.step(action)
-        print(info)
-        exit()
+        s2, reward, done, _ = env.step(action)
         total_reward += reward
+        r2 += reward
         sequence.append(action)
+        rewardsequence.append(reward)
         agent.remember(s1, action, reward, s2, done)
         if agent.counter > learn_delay and done:
             agent.train()
@@ -279,7 +284,7 @@ for i in range(iterations):
         best_avg_reward = avg
     print("\rEpisode {}/{} || Best average reward {}, Current Avg {}, Current Iteration Reward {}, eps {}, sequence{}".format(i, iterations, best_avg_reward, avg, total_reward, agent.epsilon,sequence), end='\n', flush=True)
 
-exit()
+
 plt.ylim(0, 1)
 plt.plot(rewards, color='blue', alpha=0.2, label='Reward')
 plt.plot(avg_reward, color='red', label='Average')

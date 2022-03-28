@@ -6,6 +6,8 @@ from stable_baselines import DQN
 from stable_baselines.common.env_checker import check_env
 import tqdm
 
+import pickle
+
 
 
 rewards = []
@@ -13,6 +15,8 @@ rewards = []
 def eval_model(env, model, pool):
     print("=======================")
     correctly_answered = 0.0
+    outputidk=[]
+    c=0
     for sample, index in tqdm.tqdm(pool, desc="Evaluating"):
         obs = env.reset(sample)
         state = None
@@ -27,7 +31,11 @@ def eval_model(env, model, pool):
         if info["selected_choice"] == sample.answer:
             correctly_answered += 1
             
-    rewards.append(correctly_answered/len(pool))
+        outputidk.append({"question":c,"answer":info["selected_choice"], "correct":info["selected_choice"] == sample.answer})
+            
+        c=c+1      
+    with open('classical_eval.pkl', 'wb') as f:
+        pickle.dump(outputidk, f)
 
     return correctly_answered/len(pool)
 
@@ -50,16 +58,19 @@ class MyRewardFunction(RewardFunction):
 
         current_time_step = observation.get_current_time_step()
         total_time_steps = observation.get_total_steps()
-        selected_choice = observation.get_last_choice()
+        selected_choice = observation.get_last_choice()        
+        # 1 * (2 ^ index)
         
+        correct = 0
         # if current action is ANSWER or ran out of input, then check the current choice and produce terminal reward
         if action == "ANSWER" or current_time_step == total_time_steps - 1:
-            reward = 1.0 if selected_choice == target else 0.0
+            reward = 1 if selected_choice == target else 0.0
+            if selected_choice == target:
+              correct = 1 
         elif action == "CONTINUE" and selected_choice != target:
-            reward = 1.0
+            reward = 0.1 if selected_choice != target else 0.0
         else:
             reward = 0.0
-            
         return reward
 
 # seq tag env
@@ -73,15 +84,16 @@ check_env(env, warn=True)
 # train a MLP Policy
 model = DQN(env=env, policy=DQNPolicy, gamma=0.99, batch_size=64, learning_rate=1e-3,
             double_q=False, exploration_fraction=0.1,
-            prioritized_replay=False, policy_kwargs={"layers": [64,64]},
+            prioritized_replay=False, policy_kwargs={"layers": [32]},
             verbose=1)
-for i in range(int(5)):
+for i in range(int(100)):
     model.learn(total_timesteps=int(1e+3), reset_num_timesteps=False)
-    print(eval_model(env, model, val_pool))
+
+print(eval_model(env, model, val_pool))
     
-print(rewards)
+''' print(rewards)
 
 import pickle
 with open('rewards.pkl', 'wb') as f:
     pickle.dump(rewards, f)
-    
+     '''

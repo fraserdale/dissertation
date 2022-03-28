@@ -1,3 +1,4 @@
+from itertools import starmap
 import tensorflow as tf
 import tensorflow_quantum as tfq
 
@@ -9,6 +10,7 @@ import matplotlib.pyplot as plt
 from cirq.contrib.svg import SVGCircuit
 tf.get_logger().setLevel('ERROR')
 
+print("START")
 
 def one_qubit_rotation(qubit, symbols):
     """
@@ -132,140 +134,152 @@ class ReUploadingPQC(tf.keras.layers.Layer):
 
         return self.computation_layer([tiled_up_circuits, joined_vars])
 
-def generate_model_Qlearning(qubits, n_layers, n_actions, observables, target):
-    """Generates a Keras model for a data re-uploading PQC Q-function approximator."""
+class Alternating(tf.keras.layers.Layer):
+    def __init__(self, output_dim):
+        super(Alternating, self).__init__()
+        self.w = tf.Variable(
+            initial_value=tf.constant([[(-1.)**i for i in range(output_dim)]]), dtype="float32",
+            trainable=True, name="obs-weights")
+
+    def call(self, inputs):
+        return tf.matmul(inputs, self.w)
+    
+    
+n_qubits = 4 # Dimension of the state vectors in CartPole
+n_layers = 5 # Number of layers in the PQC
+n_actions = 2 # Number of actions in CartPole
+
+qubits = cirq.GridQubit.rect(1, n_qubits)
+ops = [cirq.Z(q) for q in qubits]
+observables = [reduce((lambda x, y: x * y), ops)] # Z_0*Z_1*Z_2*Z_3
+
+def generate_model_policy(qubits, n_layers, n_actions, beta, observables):
+    """Generates a Keras model for a data re-uploading PQC policy."""
 
     input_tensor = tf.keras.Input(shape=(len(qubits), ), dtype=tf.dtypes.float32, name='input')
-    re_uploading_pqc = ReUploadingPQC(qubits, n_layers, observables, activation='tanh')([input_tensor])
-    process = tf.keras.Sequential([Rescaling(len(observables))], name=target*"Target"+"Q-values")
-    Q_values = process(re_uploading_pqc)
-    model = tf.keras.Model(inputs=[input_tensor], outputs=Q_values)
+    re_uploading_pqc = ReUploadingPQC(qubits, n_layers, observables)([input_tensor])
+    process = tf.keras.Sequential([
+        Alternating(n_actions),
+        tf.keras.layers.Lambda(lambda x: x * beta),
+        tf.keras.layers.Softmax()
+    ], name="observables-policy")
+    policy = process(re_uploading_pqc)
+    model = tf.keras.Model(inputs=[input_tensor], outputs=policy)
 
     return model
 
-model = generate_model_Qlearning(qubits, n_layers, n_actions, observables, False)
-model_target = generate_model_Qlearning(qubits, n_layers, n_actions, observables, True)
+model = generate_model_policy(qubits, n_layers, n_actions, 1.0, observables)
 
-model_target.set_weights(model.get_weights())
 
-def interact_env(state, model, epsilon, n_actions, env):
-    # Preprocess state
-    state_array = np.array(state) 
-    state = tf.convert_to_tensor(state_array)
 
-    # Sample action
-    coin = np.random.random()
-    if coin > epsilon:
-        q_vals = model([state])
-        action = int(tf.argmax(q_vals[0]).numpy())
-    else:
-        action = np.random.choice(n_actions)
+def gather_episodes(state_bounds, n_actions, model, n_episodes, env_name):
+    """Interact with environment in batched fashion."""
 
-    # Apply sampled action in the environment, receive reward and next state
-    next_state, reward, done, _ = env.step(action)
+    trajectories = [defaultdict(list) for _ in range(n_episodes)]
+    envs = [gym.make(env_name) for _ in range(n_episodes)]
 
-    interaction = {'state': state_array, 'action': action, 'next_state': next_state.copy(),
-                   'reward': reward, 'done':float(done)}
+    done = [False for _ in range(n_episodes)]
+    states = [e.reset() for e in envs]
 
-    return interaction
-    
-    
-@tf.function
-def Q_learning_update(states, actions, rewards, next_states, done, model, gamma, n_actions):
-    states = tf.convert_to_tensor(states)
-    actions = tf.convert_to_tensor(actions)
-    rewards = tf.convert_to_tensor(rewards)
-    next_states = tf.convert_to_tensor(next_states)
-    done = tf.convert_to_tensor(done)
+    while not all(done):
+        unfinished_ids = [i for i in range(n_episodes) if not done[i]]
+        normalized_states = [s/state_bounds for i, s in enumerate(states) if not done[i]]
 
-    # Compute their target q_values and the masks on sampled actions
-    future_rewards = model_target([next_states])
-    target_q_values = rewards + (gamma * tf.reduce_max(future_rewards, axis=1)
-                                                   * (1.0 - done))
-    masks = tf.one_hot(actions, n_actions)
+        for i, state in zip(unfinished_ids, normalized_states):
+            trajectories[i]['states'].append(state)
 
-    # Train the model on the states and target Q-values
-    with tf.GradientTape() as tape:
-        tape.watch(model.trainable_variables)
-        q_values = model([states])
-        q_values_masked = tf.reduce_sum(tf.multiply(q_values, masks), axis=1)
-        loss = tf.keras.losses.Huber()(target_q_values, q_values_masked)
+        # Compute policy for all unfinished envs in parallel
+        ''' normalized_states '''
+        states = tf.convert_to_tensor(states)
+        action_probs = model([states])
 
-    # Backpropagation
-    grads = tape.gradient(loss, model.trainable_variables)
-    for optimizer, w in zip([optimizer_in, optimizer_var, optimizer_out], [w_in, w_var, w_out]):
-        optimizer.apply_gradients([(grads[w], model.trainable_variables[w])])
+        # Store action and transition all environments to the next state
+        states = [None for i in range(n_episodes)]
+        for i, policy in zip(unfinished_ids, action_probs.numpy()):
+            action = np.random.choice(n_actions, p=policy)
+            states[i], reward, done[i], _ = envs[i].step(action)
+            trajectories[i]['actions'].append(action)
+            trajectories[i]['rewards'].append(reward)
 
-        
-gamma = 0.99
-n_episodes = 2000
+    return trajectories
 
-# Define replay memory
-max_memory_length = 10000 # Maximum replay length
-replay_memory = deque(maxlen=max_memory_length)
 
-epsilon = 1.0  # Epsilon greedy parameter
-epsilon_min = 0.01  # Minimum epsilon greedy parameter
-decay_epsilon = 0.99 # Decay rate of epsilon greedy parameter
-batch_size = 16
-steps_per_update = 10 # Train the model every x steps
-steps_per_target_update = 30 # Update the target model every x steps
+def compute_returns(rewards_history, gamma):
+    """Compute discounted returns with discount factor `gamma`."""
+    returns = []
+    discounted_sum = 0
+    for r in rewards_history[::-1]:
+        discounted_sum = r + gamma * discounted_sum
+        returns.insert(0, discounted_sum)
 
-optimizer_in = tf.keras.optimizers.Adam(learning_rate=0.001, amsgrad=True)
-optimizer_var = tf.keras.optimizers.Adam(learning_rate=0.001, amsgrad=True)
+    # Normalize them for faster and more stable learning
+    returns = np.array(returns)
+    returns = (returns - np.mean(returns)) / (np.std(returns) + 1e-8)
+    returns = returns.tolist()
+
+    return returns
+
+state_bounds = np.array([2.4, 2.5, 0.21, 2.5])
+gamma = 1
+batch_size = 10
+n_episodes = 1000
+optimizer_in = tf.keras.optimizers.Adam(learning_rate=0.1, amsgrad=True)
+optimizer_var = tf.keras.optimizers.Adam(learning_rate=0.01, amsgrad=True)
 optimizer_out = tf.keras.optimizers.Adam(learning_rate=0.1, amsgrad=True)
 
 # Assign the model parameters to each optimizer
 w_in, w_var, w_out = 1, 0, 2
 
-env = gym.make("CartPole-v1")
 
+@tf.function
+def reinforce_update(states, actions, returns, model):
+    states = tf.convert_to_tensor(states)
+    actions = tf.convert_to_tensor(actions)
+    returns = tf.convert_to_tensor(returns)
+
+    with tf.GradientTape() as tape:
+        tape.watch(model.trainable_variables)
+        logits = model(states)
+        p_actions = tf.gather_nd(logits, actions)
+        log_probs = tf.math.log(p_actions)
+        loss = tf.math.reduce_sum(-log_probs * returns) / batch_size
+    grads = tape.gradient(loss, model.trainable_variables)
+    for optimizer, w in zip([optimizer_in, optimizer_var, optimizer_out], [w_in, w_var, w_out]):
+        optimizer.apply_gradients([(grads[w], model.trainable_variables[w])])
+        
+        
+env_name = "CartPole-v1"
+
+# Start training the agent
 episode_reward_history = []
-step_count = 0
-for episode in range(n_episodes):
-    episode_reward = 0
-    state = env.reset()
+for batch in range(n_episodes // batch_size):
+    # Gather episodes
+    episodes = gather_episodes(state_bounds, n_actions, model, batch_size, env_name)
 
-    while True:
-        # Interact with env
-        interaction = interact_env(state, model, epsilon, n_actions, env)
+    # Group states, actions and returns in numpy arrays
+    states = np.concatenate([ep['states'] for ep in episodes])
+    actions = np.concatenate([ep['actions'] for ep in episodes])
+    rewards = [ep['rewards'] for ep in episodes]
+    returns = np.concatenate([compute_returns(ep_rwds, gamma) for ep_rwds in rewards])
+    returns = np.array(returns, dtype=np.float32)
 
-        # Store interaction in the replay memory
-        replay_memory.append(interaction)
+    id_action_pairs = np.array([[i, a] for i, a in enumerate(actions)])
 
-        state = interaction['next_state']
-        episode_reward += interaction['reward']
-        step_count += 1
+    # Update model parameters.
+    reinforce_update(states, id_action_pairs, returns, model)
 
-        # Update model
-        if step_count % steps_per_update == 0:
-            # Sample a batch of interactions and update Q_function
-            training_batch = np.random.choice(replay_memory, size=batch_size)
-            Q_learning_update(np.asarray([x['state'] for x in training_batch]),
-                              np.asarray([x['action'] for x in training_batch]),
-                              np.asarray([x['reward'] for x in training_batch], dtype=np.float32),
-                              np.asarray([x['next_state'] for x in training_batch]),
-                              np.asarray([x['done'] for x in training_batch], dtype=np.float32),
-                              model, gamma, n_actions)
+    # Store collected rewards
+    for ep_rwds in rewards:
+        episode_reward_history.append(np.sum(ep_rwds))
 
-        # Update target model
-        if step_count % steps_per_target_update == 0:
-            model_target.set_weights(model.get_weights())
+    avg_rewards = np.mean(episode_reward_history[-10:])
 
-        # Check if the episode is finished
-        if interaction['done']:
-            break
+    print('Finished episode', (batch + 1) * batch_size,
+          'Average rewards: ', avg_rewards)
 
-    # Decay epsilon
-    epsilon = max(epsilon * decay_epsilon, epsilon_min)
-    episode_reward_history.append(episode_reward)
-    if (episode+1)%10 == 0:
-        avg_rewards = np.mean(episode_reward_history[-10:])
-        print("Episode {}/{}, average last 10 rewards {}".format(
-            episode+1, n_episodes, avg_rewards))
-        if avg_rewards >= 500.0:
-            break
-    
+    if avg_rewards >= 500.0:
+        break
+
 plt.figure(figsize=(10,5))
 plt.plot(episode_reward_history)
 plt.xlabel('Epsiode')

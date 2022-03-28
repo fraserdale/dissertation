@@ -100,13 +100,11 @@ class QDQN(object):
         self.counter += 1
 
     def get_action(self, obs):
-        print(obs)
-        print(self.q_network.predict(self.convert_data(obs), steps=1))
-        print(np.argmax(self.q_network.predict(self.convert_data(obs), steps=1)[0][0]))
 
         if random.random() < self.epsilon: 
             return np.random.choice(self.action_space)
         else:
+            print(self.q_network.predict(self.convert_data(obs), steps=1),np.argmax(self.q_network.predict(self.convert_data(obs), steps=1)))
             return np.argmax(self.q_network.predict(self.convert_data(obs), steps=1))
 
     #@tf.function

@@ -52,7 +52,7 @@ class QDQN(object):
         super().__init__()
         self.action_space = action_space
         self.state_space = state_space
-        self.qubits = [cirq.GridQubit(0, i) for i in range(2)]
+        self.qubits = [cirq.GridQubit(0, i) for i in range(4)]
         self.q_network = self.make_func_approx()
         self.learning_rate = 0.001
         self.opt = tf.keras.optimizers.Adam(lr=self.learning_rate)
@@ -71,22 +71,20 @@ class QDQN(object):
         self.counter = 0
 
     def make_func_approx(self):
-        readout_operators = [cirq.Z(self.qubits[i]) for i in range(1,2)]
-        print(readout_operators)
+        readout_operators = [cirq.Z(self.qubits[i]) for i in range(2,4)]
 
         inputs = tf.keras.Input(shape=(), dtype=tf.dtypes.string)
         diff = tfq.differentiators.ParameterShift()
         init = tf.keras.initializers.Zeros
         pqc = tfq.layers.PQC(self.make_circuit(self.qubits), readout_operators, differentiator=diff, initializer=init)(inputs)
         model = tf.keras.Model(inputs=inputs, outputs=pqc)
-        print(model)
         return model
 
     def convert_data(self, classical_data, flag=True):
-        #print(classical_data)
         ops = cirq.Circuit()
         for i, ang in enumerate(classical_data):
-            #ang = 0 if ang < 0.5 else 1
+            print(ang)
+            ang = 0 if ang < 0 else 1
             ops.append(cirq.rx(np.pi * ang).on(self.qubits[i]))
             ops.append(cirq.rz(np.pi * ang).on(self.qubits[i]))
         if flag:
@@ -95,7 +93,6 @@ class QDQN(object):
             return ops
 
     def one_qubit_unitary(self, bit, symbols):
-        print("SYMBOLS " +  str(symbols))
         return cirq.Circuit(
             cirq.X(bit)**symbols[0],
             cirq.Y(bit)**symbols[1],
@@ -111,7 +108,7 @@ class QDQN(object):
         pool_circuit.append(sink_basis_selector**-1)
         return pool_circuit
 
-    ''' def make_circuit(self, qubits):
+    def make_circuit(self, qubits):
         m = cirq.Circuit()
         symbols = sympy.symbols('q0:48') # 4 qubits * 3 weights per bit * 3 layers + 2 * 6 pooling = 36 + 12 = 48
         m += self.layer(symbols[:12], qubits)
@@ -121,29 +118,15 @@ class QDQN(object):
         m += self.two_qubit_pool(self.qubits[0], self.qubits[2], symbols[36:42])
         m += self.two_qubit_pool(self.qubits[1], self.qubits[3], symbols[42:])
         print(m)
-        return m '''
-    
-    def make_circuit(self, qubits):
-        m = cirq.Circuit()
-        symbols = sympy.symbols('q0:24') # 2 qubits * 3 weights per bit * 4 layers + 1 * 6 pooling = 18 + 6 = 23
-        print(symbols)
-        m += self.layer(symbols[:6], qubits)
-        m += self.layer(symbols[6:12], qubits)
-        m += self.layer(symbols[12:18], qubits)
-        
-        
-        #print(m)
-        m += self.two_qubit_pool(self.qubits[0], self.qubits[1], symbols[18:])
-        print(m)
         return m
-        
+    
     def layer(self, weights, qubits):
         l = cirq.Circuit()
         for i in range(len(qubits) - 1):
             l.append(cirq.CNOT(qubits[i], qubits[i+1]))
-        l.append([cirq.Moment([cirq.rx(weights[j]).on(qubits[j]) for j in range(2)])])
-        l.append([cirq.Moment([cirq.ry(weights[j + 2]).on(qubits[j]) for j in range(2)])])
-        l.append([cirq.Moment([cirq.rz(weights[j + 4]).on(qubits[j]) for j in range(2)])])
+        l.append([cirq.Moment([cirq.rx(weights[j]).on(qubits[j]) for j in range(4)])])
+        l.append([cirq.Moment([cirq.ry(weights[j + 4]).on(qubits[j]) for j in range(4)])])
+        l.append([cirq.Moment([cirq.rz(weights[j + 8]).on(qubits[j]) for j in range(4)])])
         return l
     
     def remember(self, state, action, reward, next_state, done):
@@ -156,15 +139,15 @@ class QDQN(object):
         self.counter += 1
 
     def get_action(self, obs):
+    
         if random.random() < self.epsilon: 
-            print("rand")
             return np.random.choice(self.action_space)
         else:
-            print(np.argmax(self.q_network.predict(self.convert_data(obs), steps=1)[0][0]))
-            return 1 if self.q_network.predict(self.convert_data(obs), steps=1)[0][0] > 0 else 0
+            print(self.q_network.predict(self.convert_data(obs), steps=1),np.argmax(self.q_network.predict(self.convert_data(obs), steps=1)))
+            return np.argmax(self.q_network.predict(self.convert_data(obs), steps=1))
         
     def predict(self,obs):
-        pred = 1 if self.q_network.predict(self.convert_data(obs), steps=1)[0][0] > 0 else 0
+        pred = np.argmax(self.q_network.predict(self.convert_data(obs), steps=1))
         return pred
 
 

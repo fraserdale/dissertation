@@ -1,6 +1,4 @@
-
-#import gym
-from statistics import mode
+import gym
 import numpy as np
 import matplotlib.pyplot as plt
 import math
@@ -11,14 +9,11 @@ from policies import *
 tf.get_logger().setLevel('ERROR')
 tf.enable_eager_execution()
 
-import pickle
 
 def eval_model(env, model, pool):
     print("=======================")
     correctly_answered = 0.0
     print(model)
-    outputidk = []
-    c = 0
     for sample, index in tqdm.tqdm(pool, desc="Evaluating"):
         obs = env.reset(sample)
         state = None
@@ -33,13 +28,10 @@ def eval_model(env, model, pool):
         if info["selected_choice"] == sample.answer:
             correctly_answered += 1
             
-        outputidk.append({"question":c,"answer":info["selected_choice"], "correct":info["selected_choice"] == sample.answer})
-            
         print(sequence,info["selected_choice"] == sample.answer )
-        c=c+1      
-    with open('reinforcement_eval.pkl', 'wb') as f:
-        pickle.dump(outputidk, f)
-                  
+            
+    rewards.append(correctly_answered/len(pool))
+
     print("Correct: ", correctly_answered)
     print("Out of: ", len(pool))
     return correctly_answered/len(pool)
@@ -50,9 +42,9 @@ class REINFORCE(object):
         self.state_space = o_space
         self.gamma = 0.99
         self.states, self.actions, self.rewards = [], [], []
-        self.policy = ReUpPolicy(self.state_space, 10, self.action_space)
+        self.policy = ReUpPolicy2(self.state_space, 64, self.action_space)
         #self.policy = NoReUpPolicy(self.state_space, 5, self.action_space)
-        self.opt = tf.keras.optimizers.Adam(lr=0.05)
+        self.opt = tf.keras.optimizers.Adam(lr=0.001)
 
     def remember(self, s, a, r):
         self.states.append(s)
@@ -71,7 +63,7 @@ class REINFORCE(object):
             Gt = Gt * self.gamma + rewards[i]
             d_rewards[i] = Gt
         # Normalize
-        d_rewards = (d_rewards - np.mean(d_rewards)) / (np.std(d_rewards) + 1e-10)
+        d_rewards = (d_rewards - np.mean(d_rewards)) / (np.std(d_rewards) + 1e-8)
         return d_rewards
 
     def update(self):
@@ -149,7 +141,7 @@ for sample, weight in data_pool:
     env.add_sample(sample, weight) 
 
 if __name__ == "__main__":
-    iterations = 20000
+    iterations = 100000
     rolling_avg = 2500
 
     
@@ -159,7 +151,7 @@ if __name__ == "__main__":
     avg_reward = deque(maxlen=iterations)
     best_avg_reward = avg = -math.inf
     rs = deque(maxlen=rolling_avg)
-        
+    
     
     for i in range(iterations):
         s1 = env.reset()
@@ -185,14 +177,14 @@ if __name__ == "__main__":
         if avg > best_avg_reward:
             best_avg_reward = avg
         print("\rEpisode {}/{} || Best average reward {}, Current Avg {}, Current Iteration Reward {}, actions {}".format(i, iterations, best_avg_reward, avg, total_reward, actions), flush=True)
-    
+
     plt.plot(rewards, color='blue', alpha=0.2, label='Reward')
     plt.plot(avg_reward, color='red', label='Average')
     plt.legend()
     plt.ylabel('Reward')
     plt.xlabel('Iteration')
     plt.show()
-    plt.savefig("reinforce2")
+    plt.savefig("reinforce")
     print(eval_model(env,agent,val_pool))
 
 
@@ -220,13 +212,3 @@ iteration = 25000
 rolling avg = 1000
 Correct:  145.0
 Out of:  926'''
-
-
-''' 
-layers 15
-iteration = 50000
-rolling avg = 1000
-Correct:  171.0
-Out of:  926
-0.18466522678185746
-'''

@@ -50,9 +50,9 @@ class REINFORCE(object):
         self.state_space = o_space
         self.gamma = 0.99
         self.states, self.actions, self.rewards = [], [], []
-        self.policy = ReUpPolicy(self.state_space, 10, self.action_space)
+        self.policy = ReUpPolicy(self.state_space, 15, self.action_space)
         #self.policy = NoReUpPolicy(self.state_space, 5, self.action_space)
-        self.opt = tf.keras.optimizers.Adam(lr=0.05)
+        self.opt = tf.keras.optimizers.Adam(lr=0.045)
 
     def remember(self, s, a, r):
         self.states.append(s)
@@ -71,7 +71,7 @@ class REINFORCE(object):
             Gt = Gt * self.gamma + rewards[i]
             d_rewards[i] = Gt
         # Normalize
-        d_rewards = (d_rewards - np.mean(d_rewards)) / (np.std(d_rewards) + 1e-10)
+        d_rewards = (d_rewards - np.mean(d_rewards)) / (np.std(d_rewards) + 1e-11)
         return d_rewards
 
     def update(self):

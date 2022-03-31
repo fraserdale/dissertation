@@ -18,6 +18,13 @@ def eval_model(env, model, pool):
     outputidk=[]
     c=0
     for sample, index in tqdm.tqdm(pool, desc="Evaluating"):
+        if c == 381 or c== 705:
+            print(sample)
+            c+=1
+        else:
+            c+=1
+            continue
+        
         obs = env.reset(sample)
         state = None
         done = False
@@ -86,10 +93,27 @@ model = DQN(env=env, policy=DQNPolicy, gamma=0.99, batch_size=64, learning_rate=
             double_q=False, exploration_fraction=0.1,
             prioritized_replay=False, policy_kwargs={"layers": [32]},
             verbose=1)
-for i in range(int(100)):
+
+
+import time
+t = time.process_time()
+''' for i in range(int(50)):
     model.learn(total_timesteps=int(1e+3), reset_num_timesteps=False)
+ '''
+
+
+print(time.process_time() - t)
 
 print(eval_model(env, model, val_pool))
+import matplotlib.pyplot as plt
+plt.plot(rewards, color='blue', alpha=0.2, label='Reward')
+plt.plot(avg_reward, color='red', label='Average')
+plt.legend()
+plt.ylabel('Reward')
+plt.xlabel('Iteration')
+plt.show()
+plt.savefig("noitamls")
+print(eval_model(env,agent,val_pool))
     
 ''' print(rewards)
 

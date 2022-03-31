@@ -31,13 +31,16 @@ with (open("./nlp/classical_eval.pkl", "rb")) as openfile:
             break
         
 same = 0
-for x in range(len(objectsQ[0])):
-    if objectsQ[0][x]['answer'] == objectsC[0][x]['answer']:
+for x in range(len(objectsC[0])):
+    if objectsC[0][x]['answer'] == objectsQ[0][x]['answer'] and objectsC[0][x]['answer'] == "H":
         same += 1
-        if  objectsQ[0][x]['correct']:
+        if  objectsC[0][x]['correct']:
+            print("correct: ",str(x))
             sameCorrect[objectsC[0][x]['answer']] += 1
         else:
+            print("incorrect: ",str(x))
             sameIncorrect[objectsC[0][x]['answer']] += 1
+   
 print(same)
 print(sameCorrect)
 #
@@ -47,18 +50,21 @@ x_pos = [i for i, _ in enumerate(choices.keys())]
 x = np.arange(len(choices.keys()))  # the label locations
 width = 0.2
 
-fig, ax = plt.subplots()
-bars1 = ax.bar(x - width/2, sameCorrect.values(), width, label='Same Correct Prediction',color='green')
-bars2 = ax.bar(x + width/2 , sameIncorrect.values(), width, label='Same Incorrect Prediction', color='red')
-#bars3 = ax.bar(x + width, baselines.values(), width, label='Actual Answer', color='blue')
+sameIncorrect = {'A': 55, 'B': 42, 'C': 24, 'D': 15, 'E': 11, 'F': 9, 'G': 9, 'H': 321}
+sameCorrect = {'A': 67, 'B': 43, 'C': 58, 'D': 50, 'E': 48, 'F': 41, 'G': 56, 'H': 77}
 
-ax.bar_label(bars1, padding=3)
-ax.bar_label(bars2, padding=3)
-#ax.bar_label(bars3, padding=3)
+fig, ax = plt.subplots()
+''' bars1 = ax.bar(x - width, sameIncorrect.values(), width, label='Incorrect Prediction',color='red')
+bars2 = ax.bar(x , sameCorrect.values(), width, label='Correct Prediction', color='green') '''
+bars3 = ax.bar(x, baselines.values(), 0.8, label='Actual Answer', color='blue')
+
+''' ax.bar_label(bars1, padding=3)
+ax.bar_label(bars2, padding=3) '''
+ax.bar_label(bars3, padding=3)
 
 #plt.bar(x_pos, correct.values(), color='blue', alpha=0.2, label='Occurances')
 plt.legend()
-plt.ylabel('Occurances')
+plt.ylabel('Occurrences')
 plt.xlabel('Answer')
 plt.xticks(x_pos, correct.keys())
 plt.show()
